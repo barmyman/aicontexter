@@ -3,13 +3,34 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import threading
 import traceback # For detailed error logging
-from pathlib import Path # Modern way to handle file paths
+from pathlib import Path
+
+# Define directories to always skip during traversal
+DEFAULT_SKIP_DIRS = {'.git', '__pycache__', '.svn', '.hg', '.vscode', '.idea', 'node_modules'} # Added node_modules
+
+# Define file extensions/names to always exclude by default in the UI
+DEFAULT_EXCLUDE_ENTRIES = ( # Renamed for clarity (includes names and extensions)
+    # Binary/Archives/Media
+    "png,jpg,jpeg,gif,webp,ico,pdf,zip,rar,exe,dll,obj,o,so,a,lib,"
+    "bin,svg,woff,woff2,ttf,eot,otf,gz,tar,bz2,7z,"
+    "mp3,mp4,mov,avi,mkv,flv,wmv,"
+    "doc,docx,xls,xlsx,ppt,pptx,odt,ods,odp,"
+    "iso,img,dmg,"
+    "pyc,pyo,class,"
+    # Databases
+    "sqlite,sqlite3,db,db3,mdb,accdb,sqlitedb,"
+    # Metadata/OS specific - ensure names are lowercase
+    "ds_store,thumbs.db,"
+    # Common lock files
+    "lock, yarn.lock, package-lock.json" # Added common lock files
+)
+
 
 class FileCollectorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("File Collector")
-        self.root.geometry("800x600")
+        self.root.geometry("800x650")
         self.root.resizable(True, True)
 
         self.source_folder = tk.StringVar()
@@ -17,10 +38,8 @@ class FileCollectorApp:
         self.progress_var = tk.DoubleVar()
         self.status_var = tk.StringVar(value="Ready")
 
-        # If True, filters on the "File Types" tab are ignored.
         self.use_all_files = tk.BooleanVar(value=True)
 
-        # Checkboxes for common file types (initial state less important when use_all_files=True)
         self.include_php = tk.BooleanVar(value=False)
         self.include_py = tk.BooleanVar(value=True)
         self.include_xml = tk.BooleanVar(value=False)
@@ -29,18 +48,14 @@ class FileCollectorApp:
         self.include_yml = tk.BooleanVar(value=False)
         self.include_vcl = tk.BooleanVar(value=False)
 
-        # User-defined include/exclude extensions
         self.custom_include = tk.StringVar()
-        # Start with a sensible list of common binary, archive, and metadata files to exclude.
-        self.custom_exclude = tk.StringVar(value="png,jpg,jpeg,gif,webp,ico,pdf,zip,rar,exe,dll,obj,bin,svg,woff,woff2,ttf,eot,gz,tar,bz2,7z,mp3,mp4,mov,avi,doc,docx,xls,xlsx,ppt,pptx,iso,img,ds_store")
+        self.custom_exclude = tk.StringVar(value=DEFAULT_EXCLUDE_ENTRIES)
 
-        # Internal sets for efficient filtering, populated by _build_filter_sets
         self._include_ext_set = set()
-        self._exclude_ext_set = set()
+        self._exclude_entry_set = set() # Renamed for clarity
 
         self.create_widgets()
-        # Ensure the UI state matches the initial variable values after widgets are created.
-        self.update_file_type_state()
+        self.update_file_type_state() # Ensure UI state matches initial vars
 
     def create_widgets(self):
         self.notebook = ttk.Notebook(self.root)
@@ -62,7 +77,8 @@ class FileCollectorApp:
         prompt_scrollbar = ttk.Scrollbar(prompt_frame, orient=tk.VERTICAL)
         self.prompt_text_area = tk.Text(
             prompt_frame, height=5, width=70, wrap=tk.WORD,
-            yscrollcommand=prompt_scrollbar.set, undo=True
+            yscrollcommand=prompt_scrollbar.set, undo=True,
+            font=default_font # Apply font
         )
         prompt_scrollbar.config(command=self.prompt_text_area.yview)
         prompt_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -71,7 +87,6 @@ class FileCollectorApp:
         desc_label = ttk.Label(
             prompt_frame,
             text="Enter a description of your task here. This will be included at the beginning of the output file.",
-             # Ensure prompt description wraps nicely within the frame.
             wraplength=700, justify=tk.LEFT
         )
         desc_label.pack(anchor=tk.W, pady=(5, 0))
@@ -91,19 +106,17 @@ class FileCollectorApp:
         file_type_frame = ttk.LabelFrame(self.main_tab, text="File Types", padding=10)
         file_type_frame.pack(fill=tk.X, expand=False, pady=10)
 
-        # This checkbox controls whether the detailed filters on the "File Types" tab are used.
         self.process_all_files_cb = ttk.Checkbutton(
             file_type_frame,
-            text="Process all files (ignore filters on 'File Types' tab)",
+            text="Process all text files (ignore 'Include' filters, still apply 'Exclude' filters)",
             variable=self.use_all_files,
-            # Update the enabled/disabled state of the other tab when this changes.
             command=self.update_file_type_state
         )
         self.process_all_files_cb.pack(anchor=tk.W)
 
         ttk.Label(
             file_type_frame,
-            text="Uncheck the box above to enable and configure specific file type filters on the 'File Types' tab."
+            text="Uncheck the box above to use specific 'Include' filters. 'Exclude' filters on the next tab always apply."
         ).pack(anchor=tk.W, pady=(5, 0))
 
         progress_status_frame = ttk.Frame(self.main_tab)
@@ -122,14 +135,13 @@ class FileCollectorApp:
         self.generate_button.pack(pady=20)
 
     def create_file_types_tab(self):
-        # Display a message indicating if these filters are currently active or not.
         self.file_type_status_label = ttk.Label(
             self.file_types_tab, text="", foreground="darkorange",
-            font=("Helvetica", 10, "italic")
+            font=(default_font_family, default_font_size, "italic") # Use defined font
         )
         self.file_type_status_label.pack(anchor=tk.W, pady=(0, 10))
 
-        include_frame = ttk.LabelFrame(self.file_types_tab, text="Include File Types", padding=10)
+        include_frame = ttk.LabelFrame(self.file_types_tab, text="Include File Types (Only used if 'Process all text files' is UNCHECKED)", padding=10)
         include_frame.pack(fill=tk.X, expand=False, pady=5)
 
         common_types_frame = ttk.Frame(include_frame)
@@ -142,7 +154,7 @@ class FileCollectorApp:
             ("VCL (*.vcl)", self.include_vcl)
         ]
 
-        self.file_type_checkbuttons = [] # Keep references to easily enable/disable them later
+        self.file_type_checkbuttons = []
         cols = 3
         for i, (text, var) in enumerate(common_file_types):
             cb = ttk.Checkbutton(common_types_frame, text=text, variable=var)
@@ -153,64 +165,96 @@ class FileCollectorApp:
         self.include_entry = ttk.Entry(include_frame, textvariable=self.custom_include, width=70)
         self.include_entry.pack(fill=tk.X, pady=(0, 5))
 
-        exclude_frame = ttk.LabelFrame(self.file_types_tab, text="Exclude File Types (these are always excluded)", padding=10)
+        exclude_frame = ttk.LabelFrame(self.file_types_tab, text="Exclude File Types & Names (These are ALWAYS excluded)", padding=10)
         exclude_frame.pack(fill=tk.X, expand=False, pady=10)
 
-        ttk.Label(exclude_frame, text="File types to exclude (comma separated, e.g. 'jpg,png,pdf'):").pack(anchor=tk.W, pady=5)
-        self.exclude_entry = ttk.Entry(exclude_frame, textvariable=self.custom_exclude, width=70)
-        self.exclude_entry.pack(fill=tk.X, pady=5)
+        ttk.Label(exclude_frame, text=f"Comma separated list (e.g. 'jpg,png,pdf,LICENSE'). Also skips directories like {', '.join(sorted(DEFAULT_SKIP_DIRS))}.").pack(anchor=tk.W, pady=5)
+        exclude_scrollbar_y = ttk.Scrollbar(exclude_frame, orient=tk.VERTICAL)
+        exclude_scrollbar_x = ttk.Scrollbar(exclude_frame, orient=tk.HORIZONTAL)
+        self.exclude_text_area = tk.Text(
+            exclude_frame, height=4, width=70, wrap=tk.NONE,
+            yscrollcommand=exclude_scrollbar_y.set,
+            xscrollcommand=exclude_scrollbar_x.set,
+            undo=True,
+            font=default_font # Apply font
+        )
+        self.exclude_text_area.insert(tk.END, self.custom_exclude.get())
+        self.exclude_text_area.bind("<<Modified>>", self._update_custom_exclude_var)
+
+        exclude_scrollbar_y.config(command=self.exclude_text_area.yview)
+        exclude_scrollbar_x.config(command=self.exclude_text_area.xview)
+        exclude_scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
+        exclude_scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
+        self.exclude_text_area.pack(fill=tk.BOTH, expand=True, pady=5)
+        self.exclude_text_area.edit_modified(False)
 
         help_frame = ttk.LabelFrame(self.file_types_tab, text="How Filters Work", padding=10)
         help_frame.pack(fill=tk.X, expand=False, pady=10)
 
-        # Provide clear instructions on how the filtering options interact.
-        help_text = ("• On the 'Main' tab, uncheck 'Process all files' to enable these filters.\n"
-                     "• Included types: Check common types and/or add custom extensions.\n"
-                     "• Excluded types: These extensions will *always* be skipped, even if listed in 'Include'.\n"
-                     "• Enter extensions without the dot (e.g., 'py', not '.py').\n"
-                     "• Files without extensions (like 'Dockerfile') are included only if 'Process all files' is checked (and they aren't explicitly excluded).")
+        help_text = ("• On the 'Main' tab:\n"
+                     "  - CHECK 'Process all text files' to include most text files (respecting Excludes).\n"
+                     "  - UNCHECK it to use the specific 'Include' filters below (still respecting Excludes).\n"
+                     "• Included types (tab): Only used when 'Process all text files' is UNCHECKED.\n"
+                     "• Excluded types/names (tab): These files/extensions are *always* skipped.\n"
+                     f"• Hidden/system directories ({', '.join(sorted(DEFAULT_SKIP_DIRS))}, etc.) are always skipped.\n"
+                     "• Enter extensions without the dot (e.g., 'py'). Enter full names for specific files (e.g., 'LICENSE', '.env').\n"
+                     "• Files without extensions are included only if 'Process all text files' is checked (and they aren't explicitly excluded by name).")
         ttk.Label(help_frame, text=help_text, justify=tk.LEFT).pack(anchor=tk.W)
+
+    def _update_custom_exclude_var(self, event=None):
+        """Update the custom_exclude StringVar when the Text widget changes."""
+        if hasattr(self, 'exclude_text_area') and self.exclude_text_area.edit_modified():
+             current_text = self.exclude_text_area.get("1.0", tk.END).strip()
+             self.custom_exclude.set(current_text)
+             self.exclude_text_area.edit_modified(False)
+             # Rebuild filters immediately when exclude changes
+             self._build_filter_sets()
+
 
     def update_file_type_state(self):
         """Enable or disable the file type filter widgets based on the 'use_all_files' checkbox."""
-        use_filters = not self.use_all_files.get()
-        new_state = tk.NORMAL if use_filters else tk.DISABLED
+        use_specific_includes = not self.use_all_files.get()
+        include_state = tk.NORMAL if use_specific_includes else tk.DISABLED
+        exclude_state = tk.NORMAL # Exclude widget is always active
 
-        # Update the status label on the File Types tab to reflect the current state.
-        if hasattr(self, 'file_type_status_label'): # Check widget exists
-             if use_filters:
-                 self.file_type_status_label.config(text="")
+        if hasattr(self, 'file_type_status_label'):
+             if use_specific_includes:
+                 self.file_type_status_label.config(text="Using specific 'Include' filters below (and 'Exclude' filters).")
              else:
-                 self.file_type_status_label.config(text="Filters disabled (using 'Process all files' option on Main tab)")
+                 self.file_type_status_label.config(text="Ignoring 'Include' filters (using 'Process all text files' option). 'Exclude' filters still apply.")
 
-        # Enable/disable the individual filter widgets.
         if hasattr(self, 'file_type_checkbuttons'):
             for cb in self.file_type_checkbuttons:
                  if cb.winfo_exists():
-                    cb.config(state=new_state)
+                    cb.config(state=include_state)
         if hasattr(self, 'include_entry') and self.include_entry.winfo_exists():
-            self.include_entry.config(state=new_state)
-        if hasattr(self, 'exclude_entry') and self.exclude_entry.winfo_exists():
-            self.exclude_entry.config(state=new_state)
+            self.include_entry.config(state=include_state)
+        if hasattr(self, 'exclude_text_area') and self.exclude_text_area.winfo_exists():
+             self.exclude_text_area.config(state=exclude_state) # Ensure exclude text is always editable
 
-        # Rebuild the internal filter sets to match the current UI state.
-        # The exclude set is always needed, include set only matters if filters are active.
-        self._build_filter_sets()
+        self._build_filter_sets() # Rebuild filters whenever state changes
 
-    def _parse_extensions(self, ext_string):
-        """Convert a comma-separated string of extensions into a lowercase set, removing dots."""
-        if not ext_string:
+    def _parse_filter_entries(self, entry_string):
+        """Convert a comma-separated string of names/extensions into a lowercase set."""
+        if not entry_string:
             return set()
-        return {ext.strip().lower().lstrip('.') for ext in ext_string.split(',') if ext.strip()}
+        parsed = set()
+        for item in entry_string.split(','):
+            cleaned_item = item.strip().lower()
+            if cleaned_item:
+                 # Store entries exactly as cleaned (e.g., 'ds_store', 'py', 'license', '.env')
+                 parsed.add(cleaned_item)
+        return parsed
+
 
     def _build_filter_sets(self):
-        """Update the internal sets of included and excluded extensions based on UI."""
-        # Always parse the exclude list from the UI.
-        self._exclude_ext_set = self._parse_extensions(self.custom_exclude.get())
-        # Force-add .DS_Store to ensure it's always ignored, regardless of user input.
-        self._exclude_ext_set.add("ds_store")
+        """Update the internal sets of included and excluded entries based on UI."""
+        # Build exclude set from the text area (via the StringVar)
+        self._exclude_entry_set = self._parse_filter_entries(self.custom_exclude.get())
+        # Ensure core OS/Metadata files are always excluded, case-insensitively
+        self._exclude_entry_set.update(["ds_store", "thumbs.db"]) # Add specific names known to cause issues
 
-        # Only build the include set if the filters are actually enabled.
+        # Build include set ONLY if specific filters are enabled
         if not self.use_all_files.get():
             include_types = set()
             if self.include_php.get(): include_types.add("php")
@@ -221,12 +265,13 @@ class FileCollectorApp:
             if self.include_yml.get(): include_types.update(["yml", "yaml"])
             if self.include_vcl.get(): include_types.add("vcl")
 
-            custom_includes = self._parse_extensions(self.custom_include.get())
-            include_types.update(custom_includes)
-            self._include_ext_set = include_types
+            custom_includes = self._parse_filter_entries(self.custom_include.get())
+            # Only add extensions from custom includes, not full names
+            include_types.update(inc for inc in custom_includes if not os.path.sep in inc and '.' not in inc) # Basic check for extension format
+            self._include_ext_set = {ext.lstrip('.') for ext in include_types} # Ensure no leading dots in include set
         else:
-             # If processing all files, the include set is irrelevant.
              self._include_ext_set.clear()
+
 
     def browse_source(self):
         folder_path = filedialog.askdirectory(title="Select Source Folder", initialdir=Path.home())
@@ -234,10 +279,8 @@ class FileCollectorApp:
             self.source_folder.set(folder_path)
 
     def browse_output(self):
-        # Suggest a reasonable output filename based on the source folder's name.
         source_name = Path(self.source_folder.get()).name
         initial_filename = f"{source_name}_collected.txt" if source_name else "collected_files.txt"
-
         file_path = filedialog.asksaveasfilename(
             title="Save Output File As...",
             initialdir=Path.home(), initialfile=initial_filename,
@@ -248,33 +291,40 @@ class FileCollectorApp:
             self.output_file.set(file_path)
 
     def should_process_file(self, file_path: Path) -> bool:
-        """Check if a given file should be included in the output based on current settings."""
-        ext_lower = file_path.suffix[1:].lower() if file_path.suffix else ""
+        """Check if a given file should be included based on exclusion/inclusion rules."""
+        file_name_lower = file_path.name.lower()
+        # Get extension without dot, or empty string if no extension
+        extension_lower = file_path.suffix[1:].lower() if file_path.suffix else ""
 
-        # --- RULE 1: Always check the exclude list first. ---
-        # This applies whether "Process all files" is checked or not.
-        if ext_lower in self._exclude_ext_set:
+        # --- RULE 1: Check Exclusions ---
+        # Check if the full filename (lowercase) is explicitly excluded
+        if file_name_lower in self._exclude_entry_set:
+            # print(f"Excluding '{file_path.name}' based on full name match in exclude set.")
             return False
-        # Also exclude extensionless files if they match an "exclude" rule (e.g., user added 'LICENSE' to exclude)
-        # Note: This requires the user to add the *exact* filename without extension to the exclude list.
-        if not ext_lower and file_path.name in self._exclude_ext_set:
-             return False
+        # Check if the extension (lowercase, no dot) is explicitly excluded
+        if extension_lower and extension_lower in self._exclude_entry_set:
+            # print(f"Excluding '{file_path.name}' based on extension '.{extension_lower}' in exclude set.")
+            return False
 
-        # --- RULE 2: If "Process all files" is checked, include everything not excluded above. ---
+        # --- RULE 2: "Process All Text Files" Mode ---
         if self.use_all_files.get():
-            return True # It wasn't excluded, so include it.
+            # Include if it wasn't excluded above
+            # print(f"Including '{file_path.name}' (Process All Text Files mode).")
+            return True
 
-        # --- RULE 3: Filters are active ("Process all files" is unchecked). ---
-        # Skip files without extensions when filters are active.
-        if not ext_lower:
+        # --- RULE 3: Specific Include Filters Mode ---
+        # In this mode, files MUST have an extension...
+        if not extension_lower:
+             # print(f"Excluding '{file_path.name}' (no extension in Specific Include mode).")
              return False
-
-        # If the include list is empty, nothing passes the filter (except when "Process all" is on).
-        if not self._include_ext_set:
+        # ...and that extension must be in the include set.
+        # The include set (_include_ext_set) is guaranteed to not have leading dots by _build_filter_sets
+        if extension_lower in self._include_ext_set:
+             # print(f"Including '{file_path.name}' based on extension '.{extension_lower}' in include list.")
+             return True
+        else:
+             # print(f"Excluding '{file_path.name}' (extension '.{extension_lower}' not in include list).")
              return False
-
-        # Include the file only if its extension is in the specific include list.
-        return ext_lower in self._include_ext_set
 
 
     def generate_file(self):
@@ -295,84 +345,93 @@ class FileCollectorApp:
             return
         output_path = Path(output_str)
 
-        # Safety check: Prevent selecting the output file *inside* the source directory,
-        # as this could lead to infinite loops or unexpected behavior on re-runs.
+        # Safety check: Prevent output inside source
         try:
             resolved_output = output_path.resolve()
             resolved_source = source_path.resolve()
+            # Use is_relative_to for robust check across OS/mount points if possible
+            # Add explicit check for equality too
             if resolved_output == resolved_source or resolved_output.is_relative_to(resolved_source):
                  if not messagebox.askyesno("Warning", "The output file is inside the source folder. This could lead to processing the output file itself on subsequent runs.\n\nContinue anyway?", parent=self.root, icon='warning'):
                      return
-        except OSError as e:
-             # This might happen if paths are invalid or permissions are wrong. Warn but continue.
-             print(f"Warning: Could not resolve paths for safety check - {e}")
-        except Exception as e:
+        except (OSError, ValueError) as e: # Catch resolution errors or ValueError from is_relative_to (e.g. different drives)
              print(f"Warning: Could not perform output/source path check - {e}")
+
 
         self.generate_button.config(state=tk.DISABLED)
         self.status_var.set("Starting collection...")
         self.progress_var.set(0)
         self.status_label.config(foreground="blue")
 
-        # Ensure filter sets are up-to-date before starting the thread.
+        # Ensure filter sets are up-to-date before starting thread
+        # Force update from text area in case user didn't trigger the <<Modified>> event
+        self._update_custom_exclude_var()
         self._build_filter_sets()
 
-        # Run the potentially long file operation in a background thread to keep the UI responsive.
         threading.Thread(
             target=self.collect_files_thread,
             args=(source_path, output_path, prompt),
-            daemon=True # Allows the app to exit even if this thread hangs.
+            daemon=True
         ).start()
 
     def collect_files_thread(self, source_path: Path, output_path: Path, prompt: str):
         try:
             self.status_var.set("Scanning folders...")
-
-            # Use rglob("*") to find EVERYTHING recursively (files, dirs, links, etc.).
-            # We'll filter down to just the files we want next.
-            all_potential_items = source_path.rglob("*")
-
-            self.status_var.set("Filtering files...")
             files_to_process = []
-            # Resolve the output path once to efficiently check against it later.
             resolved_output_path = None
             try:
-                resolved_output_path = output_path.resolve()
-            except Exception: # Handle cases where output might not exist yet or other errors.
-                pass
+                # Resolve needs the file to potentially exist, use absolute() as fallback
+                resolved_output_path = output_path.resolve() if output_path.exists() else output_path.absolute()
+            except Exception as e:
+                 print(f"Warning: Could not resolve output path '{output_path}' for self-check: {e}")
+                 resolved_output_path = output_path.absolute()
 
-            # Iterate through all found items and keep only the files that match our criteria.
-            for item_path in all_potential_items:
-                # Important: Skip processing the output file itself if it's inside the source.
-                if resolved_output_path and item_path.resolve() == resolved_output_path:
-                    continue
+            skipped_dirs_count = 0
+            processed_dirs_count = 0
+            # Use os.walk for efficient directory skipping
+            for root, dirs, files in os.walk(source_path, topdown=True):
+                processed_dirs_count += 1
+                current_root_path = Path(root)
 
-                # Check if it's a file and passes the include/exclude rules.
-                if item_path.is_file() and self.should_process_file(item_path):
-                    files_to_process.append(item_path)
+                # Modify dirs in-place to prevent os.walk from descending into them
+                original_dir_count = len(dirs)
+                dirs[:] = [d for d in dirs if d.lower() not in DEFAULT_SKIP_DIRS]
+                skipped_dirs_count += (original_dir_count - len(dirs))
 
+                for filename in files:
+                    file_path = current_root_path / filename
+                    try:
+                        # Check for output file collision
+                        # Use absolute paths for comparison if resolve fails or paths are tricky
+                        if resolved_output_path and file_path.absolute() == resolved_output_path:
+                            continue
+                    except OSError as e:
+                         # Handle potential errors during absolute() call, though less likely
+                         print(f"Warning: Error getting absolute path for self-check: {file_path} - {e}")
+
+
+                    if self.should_process_file(file_path):
+                        files_to_process.append(file_path)
+
+            self.status_var.set(f"Scan complete. Found {len(files_to_process)} files to process (scanned {processed_dirs_count} dirs, skipped {skipped_dirs_count} hidden/system dirs).")
             total_files = len(files_to_process)
 
             if total_files == 0:
-                # Inform the user via the main thread's event loop.
                 self.root.after(0, lambda: messagebox.showwarning(
                     "No Files Found",
-                    "No files matching the criteria were found in the source folder.\n"
-                    "Please check the folder contents and your file type filters (including excludes).",
+                    "No files matching the criteria were found in the source folder or all were excluded.\n"
+                    f"Checked {processed_dirs_count} directories, skipped {skipped_dirs_count} hidden/system directories (like .git).\n"
+                    "Please check the folder contents and your file type filters (especially Excludes).",
                     parent=self.root
                 ))
-                self.status_var.set("Ready (No matching files)")
+                self.status_var.set(f"Ready (No matching files found)")
                 self.root.after(0, lambda: self.generate_button.config(state=tk.NORMAL))
                 return
 
             processed_files = 0
-            # Attempt common text encodings. Add more if needed for specific project files.
             encodings_to_try = ['utf-8', 'latin-1', 'cp1252']
-
-            # Make sure the directory for the output file exists.
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Open the output file; use 'replace' for encoding errors during writing (less likely but safe).
             with open(output_path, 'w', encoding='utf-8', errors='replace') as out_file:
                 out_file.write(f"Source Folder: {source_path.resolve()}\n")
                 if prompt:
@@ -383,37 +442,51 @@ class FileCollectorApp:
                 out_file.write("=" * 80 + "\n\n")
 
                 for file_path in files_to_process:
-                    relative_path = file_path.relative_to(source_path)
-                    self.status_var.set(f"Processing ({processed_files+1}/{total_files}): {relative_path}")
+                    try:
+                        relative_path = file_path.relative_to(source_path)
+                    except ValueError:
+                        relative_path = file_path # Fallback
 
+                    self.status_var.set(f"Processing ({processed_files+1}/{total_files}): {relative_path}")
                     file_ext_display = file_path.suffix[1:].lower() if file_path.suffix else "no extension"
                     out_file.write(f"==== FILE: {relative_path} [{file_ext_display}] ====\n\n")
 
                     content = None
                     error_msg = None
                     processed_successfully = False
+
                     try:
-                        # Try reading the file using different encodings.
+                        # Try reading with different encodings, check for null bytes
                         read_error = None
                         for enc in encodings_to_try:
                             try:
                                 with open(file_path, 'r', encoding=enc) as f:
-                                    content = f.read()
+                                    chunk = f.read(1024) # Check first 1KB for binary indicator
+                                    if '\0' in chunk:
+                                         read_error = f"Contains null bytes (likely binary), read attempted with {enc}"
+                                         processed_successfully = False
+                                         break # Stop trying encodings
+
+                                    content = chunk + f.read()
                                 processed_successfully = True
-                                break # Found a working encoding.
+                                break # Success
                             except UnicodeDecodeError:
                                 read_error = f"Failed to decode with {enc}"
-                                continue # Try the next encoding.
+                                continue
+                            except OSError as e:
+                                read_error = f"OS Error reading: {e}"
+                                break
                             except Exception as e:
-                                # Catch other file read issues (e.g., permissions).
-                                read_error = f"{type(e).__name__} - {e}"
-                                break # No point trying other encodings for this type of error.
+                                read_error = f"Unexpected Error reading: {type(e).__name__} - {e}"
+                                break
 
                         if not processed_successfully:
-                            error_msg = f"[Read Error: Could not read file as text ({read_error or 'Unknown text read issue'})]"
+                            # Use the most relevant error message captured
+                            error_msg = f"[Read Error: Could not read file as text (Reason: {read_error or 'Unknown issue or binary content'})]"
 
+                    except OSError as e:
+                         error_msg = f"[Read Error: Pre-read OS error - {e}]"
                     except Exception as e:
-                         # Catch errors happening even before trying to open/read.
                          error_msg = f"[Read Error: Pre-open error - {type(e).__name__} - {e}]"
 
                     if content is not None:
@@ -421,16 +494,13 @@ class FileCollectorApp:
                     elif error_msg:
                          out_file.write(error_msg + "\n")
                     else:
-                         out_file.write("[Read Error: Unknown issue reading file]\n") # Should be rare.
+                         # Should only happen if processed_successfully is False but no error_msg (e.g. null byte hit)
+                         out_file.write(f"[Read Error: File skipped (likely binary or encoding issue)]\n")
 
                     out_file.write("\n\n" + "=" * 80 + "\n\n")
-
                     processed_files += 1
-                    progress_percentage = (processed_files / total_files) * 100
-                    # Update the progress bar via the Tkinter variable (thread-safe).
-                    self.progress_var.set(progress_percentage)
+                    self.progress_var.set((processed_files / total_files) * 100)
 
-            # Report success back to the user on the main GUI thread.
             final_message = (f"File collection complete!\n\n"
                              f"Processed {processed_files} files.\n"
                              f"Output saved to:\n{output_path.resolve()}")
@@ -439,50 +509,53 @@ class FileCollectorApp:
             self.status_label.config(foreground="green")
 
         except Exception as e:
-            # Log the full error details for debugging.
             print("--- ERROR DURING FILE COLLECTION ---")
             traceback.print_exc()
             print("------------------------------------")
-            # Show a user-friendly error message on the main GUI thread.
             error_details = f"An error occurred during file collection:\n\n{type(e).__name__}: {e}\n\n(Check console output for more details)"
             self.root.after(0, lambda: messagebox.showerror("Error", error_details, parent=self.root))
             self.status_var.set("Error occurred (See console for details)")
             self.status_label.config(foreground="red")
 
         finally:
-             # Crucial: Always re-enable the button on the main thread, whether success or error.
              self.root.after(0, lambda: self.generate_button.config(state=tk.NORMAL))
 
 
 if __name__ == "__main__":
     root = tk.Tk()
-
-    # Try to apply a more modern theme if available on the system.
     style = ttk.Style()
     available_themes = style.theme_names()
+    # Prefer more modern themes
     if 'clam' in available_themes: style.theme_use('clam')
     elif 'vista' in available_themes: style.theme_use('vista')
     elif 'aqua' in available_themes: style.theme_use('aqua')
+    elif 'gtk' in available_themes: style.theme_use('gtk')
+    elif 'winxpnative' in available_themes: style.theme_use('winxpnative')
 
-    # Use a common modern font like Segoe UI if available, otherwise fall back.
     default_font_family = 'Segoe UI'
     default_font_size = 10
     try:
         import tkinter.font
-        # Check if the font exists to avoid errors.
-        tkinter.font.Font(family=default_font_family, size=default_font_size)
-        default_font = (default_font_family, default_font_size)
-    except tk.TclError:
-        default_font = (None, default_font_size) # Use system default font family.
+        font_families = tkinter.font.families()
+        if default_font_family not in font_families:
+             # Basic fallback font logic
+             if 'Helvetica' in font_families: default_font_family = 'Helvetica'
+             elif 'Arial' in font_families: default_font_family = 'Arial'
+             else: default_font_family = None
 
-    # Apply some basic styling for consistency.
+        default_font = (default_font_family, default_font_size)
+        bold_font = (default_font_family, default_font_size, 'bold')
+    except Exception:
+        default_font = (None, default_font_size)
+        bold_font = (None, default_font_size, 'bold')
+
     style.configure('TButton', font=default_font, padding=5)
     style.configure('TLabel', font=default_font)
     style.configure('TEntry', font=default_font, padding=3)
     style.configure('TCheckbutton', font=default_font)
     style.configure('TFrame', background=style.lookup('TFrame', 'background'))
-    style.configure('TLabelframe', font=(default_font[0], default_font[1], 'bold'), padding=10)
-    style.configure('TLabelframe.Label', font=(default_font[0], default_font[1], 'bold'))
+    style.configure('TLabelframe', font=bold_font, padding=10)
+    style.configure('TLabelframe.Label', font=bold_font)
     style.configure('TNotebook.Tab', font=default_font, padding=[10, 5])
 
     app = FileCollectorApp(root)
