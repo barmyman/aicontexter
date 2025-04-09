@@ -2,6 +2,10 @@
 
 How many times did you try to get smth from AI chat and realized that it looses your context? With this, you can simply gather all you project file's content into one file, fill the prompt and AI chat will be fully into your context to give you best help.
 
+<img width="1244" alt="Screenshot 2025-04-09 at 12 00 54" src="https://github.com/user-attachments/assets/ee41fa99-55f9-41b6-8236-8eccd0a9f8cc" />
+<img width="1251" alt="Screenshot 2025-04-09 at 12 00 48" src="https://github.com/user-attachments/assets/b743b409-4a4e-4e6e-87da-e6922847f829" />
+
+
 ## Features
 
 - **Collect Files Recursively**: Scan through directories and subdirectories to find all matching files
