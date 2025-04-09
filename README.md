@@ -1,4 +1,4 @@
-# File Collector
+# AIContexter - Python File Collector
 
 How many times did you try to get smth from AI chat and realized that it looses your context? With this, you can simply gather all you project file's content into one file, fill the prompt and AI chat will be fully into your context to give you best help.
 
